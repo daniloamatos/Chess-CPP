@@ -2,147 +2,190 @@
 #include <iostream>
 #include <raylib.h>
 
-bool validateMovement(const Board& board, int from, int to, int color)
+void setSquare(Board& board, int square, std::uint8_t piece)
 {
-    int piece = board.squares[from];
-    int xDiff = (from / 8) - (to / 8);
-    int yDiff = (from % 8) - (to % 8);
+    const std::uint64_t bit = 1ULL << square;
+    const int old = board.squares[square];
     
-    if (color == 1)
-        piece -= 6;
-    if (piece == 1)
+    if (old != 0)
     {
-        bool initialRow = color == 0
-            ? (from == 60)
-            : (from == 4);
-        if (initialRow)
-        {
-            int colStep = (yDiff < 0) - (yDiff > 0);
-            bool castlingTarget = color == 0
-            ? (to == 62 || to == 58)
-            : (to == 6 || to == 2);
-            if (castlingTarget)
-            {
-                int rookSquare = to + (colStep > 0 ? colStep : 2 * colStep);
-                if (colStep > 0 ? !board.canCastleKingside[color] : !board.canCastleQueenside[color])
-                    return false;
-                if (board.squares[rookSquare] == (color == 0 ? 6 : 12))
-                {
-                    for (int square = from + colStep; square != rookSquare; square += colStep)
-                    {
-                        if (board.squares[square] != 0)
-                            return false;
-                    }
-                    return true;
-                }
-            }
-        }
-        if (std::abs(xDiff) > 1 || std::abs(yDiff) > 1)
-        {
-            return false;
-        }
-        return color == 0 
-            ? !(board.squares[to] >= 1 && board.squares[to] <= 6)
-            : !(board.squares[to] >= 7 && board.squares[to] <= 12);
+        const int oldColor = (old - 1) / 6;
+        const int oldPiece = (old - 1) % 6;
+        board.pieces[oldColor][oldPiece] &= ~bit;
     }
-    if (piece == 2)
+
+    board.squares[square] = piece;
+    
+    if (piece != 0)
     {
-        //Blocks movement if is isn't on the same line or diagonal
-        if (xDiff != 0 && yDiff != 0 && std::abs(xDiff) != std::abs(yDiff))
-            return false;
-        //Defines the direction the movement will occour. 
-        //Eg: xDiff = -2, from row 4 to row 6, rowStep = +1, so it will walk DOWN; xDiff = 3, from row 5 to row 2, rowStep = -1 it will walk up 
-        //(because the board matrix starts on the top left-most corner with 0 and ends on the bottom right-most corner with 63)
-        int rowStep = (xDiff < 0) - (xDiff > 0);
-        int colStep = (yDiff < 0) - (yDiff > 0);
-        //One row up square -= 8, one row down square += 8, start at square 27 -> square 36, step = 9 (rowStep = 1 * 8) + colStep = 1
-        int step = rowStep * 8 + colStep;
-        //Blocks movement if enemy pieces are in the way
-        for (int square = from + step; square != to; square += step)
-        {
-            if (board.squares[square] != 0)
-                return false;
-        }
-        //Blocks movement if friendly pieces are in the way
-        return color == 0 
-            ? !(board.squares[to] >= 1 && board.squares[to] <= 6)
-            : !(board.squares[to] >= 7 && board.squares[to] <= 12);
+        const int newColor = (piece - 1) / 6;
+        const int newPiece = (piece - 1) % 6;
+        board.pieces[newColor][newPiece] |= bit;
     }
-    if (piece == 3){
-        xDiff *=  color == 1 ? -1 : 1;
-        bool initialRow = color == 0
-            ? (from >= 48 && from < 56)
-            : (from >= 8 && from < 16);
-        //if only moving on the x-axis and one square foward
-        if (xDiff == 1 && yDiff == 0)
-            //if to is empty
-            return board.squares[to] == 0;
-        //check if is the inicial step and if is only moving on the x-axis
-        else if (yDiff == 0 && xDiff == 2 && initialRow)
-            //check if the to and the square in between from -> to are both empty
-            return board.squares[(from + to) / xDiff] == 0 && board.squares[to] == 0;
-        //check if is moving only forward once on the x-axis and once on the y-axis
-        if (xDiff == 1 && (yDiff == -1 || yDiff == 1))
-            //check if there is a black piece on to
-            return (to == board.enPassantTarget && board.squares[to] == 0)
-            || (color == 0
-                ? board.squares[to] >= 7 && board.squares[to] <= 12
-                : board.squares[to] >= 1 && board.squares[to] <= 6);
-            
+};
+
+std::uint64_t occupiedBy(const Board& board, int color)
+{
+    std::uint64_t occupied = 0;
+    for (int type = 0; type < 6; ++type)
+        occupied |= board.pieces[color][type];
+
+    return occupied;
+};
+void addPawnMove(MoveList& moves, int color, int from, int to)
+{
+    const bool promotion = color == 0 ? to < 8 : to >= 56;
+
+    if (!promotion) {
+        moves.add(Move{from, to, 0});
+        return;
     }
-    if (piece == 4)
+
+    const int options[4] = {
+        color == 0 ? 2 : 8,
+        color == 0 ? 6 : 12,
+        color == 0 ? 4 : 10,
+        color == 0 ? 5 : 11
+    };
+
+    for (int i = 0; i < 4; ++i)
+        moves.add(Move{
+            from, to, static_cast<std::uint8_t>(options[i])
+        });
+};
+void generatePawnMoves(const Board& board, int color, std::uint64_t occupied, std::uint64_t enemyPieces, MoveList& moves)
+{
+    const int enPassant = board.enPassantTarget;
+
+    const std::uint64_t ownPawns = board.pieces[color][2];
+    const std::uint64_t emptySquares = ~occupied;
+    const std::uint64_t initialRank = color == 0 
+        ? (0xFFULL << 48)
+        : (0xFFULL << 8);
+
+    const std::uint64_t initialPawns = ownPawns & initialRank;
+    const std::uint64_t initialSinglePushes = color == 0
+        ? (initialPawns >> 8) & emptySquares
+        : (initialPawns << 8) & emptySquares;
+
+    std::uint64_t singlePushes = color == 0
+        ? (ownPawns >> 8) & emptySquares
+        : (ownPawns << 8) & emptySquares;
+    std::uint64_t doublePushes = color == 0
+        ? (initialSinglePushes >> 8) & emptySquares
+        : (initialSinglePushes << 8) & emptySquares;
+
+    const int direction = color == 0 ? -8 : 8;
+    
+    const std::uint64_t fileA = 0x0101010101010101ULL;
+    const std::uint64_t fileH = 0x8080808080808080ULL;
+
+    std::uint64_t captureTargets = enemyPieces;
+
+    if (enPassant >= 0 && enPassant < 64)
+        captureTargets |= (1ULL << enPassant) & emptySquares;
+
+    std::uint64_t capturesLeft = color == 0
+        ? ((ownPawns & ~fileA) >> 9) & captureTargets
+        : ((ownPawns & ~fileA) << 7) & captureTargets;
+
+    std::uint64_t capturesRight = color == 0
+        ? ((ownPawns & ~fileH) >> 7) & captureTargets
+        : ((ownPawns & ~fileH) << 9) & captureTargets;
+
+
+    while (singlePushes != 0)
     {
-        if(std::abs(yDiff) != std::abs(xDiff))
-        {
-            return false;
-        }
-        //Defines the direction the movement will occour. 
-        //Eg: xDiff = -2, from row 4 to row 6, rowStep = +1, so it will walk DOWN; xDiff = 3, from row 5 to row 2, rowStep = -1 it will walk up 
-        //(because the board matrix starts on the top left-most corner with 0 and ends on the bottom right-most corner with 63)
-        int rowStep = (xDiff < 0) - (xDiff > 0);
-        int colStep = (yDiff < 0) - (yDiff > 0);
-        //One row up square -= 8, one row down square += 8, start at square 27 -> square 36, step = 9 (rowStep = 1 * 8) + colStep = 1
-        int step = rowStep * 8 + colStep;
-        //Blocks movement if enemy pieces are in the way
-        for (int square = from + step; square != to; square += step)
-        {
-            if (board.squares[square] != 0)
-                return false;
-        }
-        return color == 0 
-            ? !(board.squares[to] >= 1 && board.squares[to] <= 6)
-            : !(board.squares[to] >= 7 && board.squares[to] <= 12);
+        const int to = __builtin_ctzll(singlePushes);
+        const int from = to - direction;
+        addPawnMove(moves, color, from, to);
+        singlePushes &= singlePushes - 1;
     }
-    if (piece == 5)
+
+    while (doublePushes != 0)
     {
-        if ((std::abs(xDiff) == 2 && std::abs(yDiff) == 1) || (std::abs(xDiff) == 1 && std::abs(yDiff) == 2))
-        {
-            return color == 0 
-            ? !(board.squares[to] >= 1 && board.squares[to] <= 6)
-            : !(board.squares[to] >= 7 && board.squares[to] <= 12);
-        }
+        const int to = __builtin_ctzll(doublePushes);
+        const int from = to - 2 * direction;
+        moves.add(Move{from, to, 0});
+        doublePushes &= doublePushes - 1;
     }
-    if (piece == 6)
+    while (capturesLeft != 0)
     {
-        if((std::abs(xDiff) != std::abs(yDiff)) && (std::abs(yDiff) == 0 || std::abs(xDiff) == 0))
-        {
-            //Defines the direction the movement will occour. 
-            //Eg: xDiff = -2, from row 4 to row 6, rowStep = +1, so it will walk DOWN; xDiff = 3, from row 5 to row 2, rowStep = -1 it will walk up 
-            //(because the board matrix starts on the top left-most corner with 0 and ends on the bottom right-most corner with 63)
-            int rowStep = (xDiff < 0) - (xDiff > 0);
-            int colStep = (yDiff < 0) - (yDiff > 0);
-            //One row up square -= 8, one row down square += 8, start at square 27 -> square 36, step = 9 (rowStep = 1 * 8) + colStep = 1
-            int step = rowStep * 8 + colStep;
-            //Blocks movement if enemy pieces are in the way
-            for (int square = from + step; square != to; square += step)
-            {
-                if (board.squares[square] != 0)
-                    return false;
-            }
-            return color == 0 
-                ? !(board.squares[to] >= 1 && board.squares[to] <= 6)
-                : !(board.squares[to] >= 7 && board.squares[to] <= 12);
-        }
+        const int leftDirection  = color == 0 ? -9 : 7;
+        const int to = __builtin_ctzll(capturesLeft);
+        const int from = to - leftDirection;
+        addPawnMove(moves, color, from, to);
+        capturesLeft &= capturesLeft - 1;
     }
-    return false;
-}
+    while (capturesRight != 0)
+    {
+        const int rightDirection = color == 0 ? -7 : 9;
+        const int to = __builtin_ctzll(capturesRight);
+        const int from = to - rightDirection;
+        addPawnMove(moves, color, from, to);
+        capturesRight &= capturesRight - 1;
+    }
+    return;
+};
+
+MoveList generateMoves(const Board& board, int color)
+{
+    std::uint64_t ownPieces = occupiedBy(board, color);
+    std::uint64_t enemyPieces = occupiedBy(board, 1 - color);
+    std::uint64_t occupied = ownPieces | enemyPieces;
+
+    MoveList moves;
+
+    generatePawnMoves(board, color, occupied, enemyPieces, moves);
+    
+    return moves;
+};
+
+MoveResult makeMove(Board& board, Move& move)
+{
+    MoveResult result;
+    const int from = move.from;
+    const int to = move.to;
+    const int piece = board.squares[from];
+    const int captured = board.squares[to];
+    const int color = piece < 7 ? 0 : 1;
+    if(piece == 1 || (piece == 6 && from == 56))
+        board.canCastleQueenside[0] = false;
+    if (piece == 1 || (piece == 6 && from == 63))
+        board.canCastleKingside[0] = false;
+    else if(piece == 7 || (piece == 12 && from == 0))
+        board.canCastleQueenside[1] = false;
+    if (piece == 7 || (piece == 12 && from == 7))
+        board.canCastleKingside[1] = false;
+    if (captured == 6 && to == 56)
+        board.canCastleQueenside[0] = false;
+    if (captured == 6 && to == 63)
+        board.canCastleKingside[0] = false;
+    if (captured == 12 && to == 0)
+        board.canCastleQueenside[1] = false;
+    if (captured == 12 && to == 7)
+        board.canCastleKingside[1] = false;
+    setSquare(board, to, move.promotion != 0 ? move.promotion : piece);
+    const bool reachedPromotionRank = (piece == 3 && to < 8) || (piece == 9 && to >= 56);
+    setSquare(board, from, 0);
+    if (std::abs(from - to) == 2 && (piece == 1 || piece == 7))
+    {
+        int rookFrom = (color == 0 ? 56 : 0) + (to > from ? 7 : 0) ;
+        int rookTo = (from + to) / 2;
+        setSquare(board, rookTo, color == 0 ? 6 : 12);
+        setSquare(board, rookFrom, 0);
+        result.rookFrom = rookFrom;
+        result.rookTo = rookTo;
+    }
+    if ((piece == 3 || piece == 9) && to == board.enPassantTarget && captured == 0)
+    {
+        int capturedSquare = to + (color == 0 ? 8 : -8);
+        setSquare(board, capturedSquare, 0);
+        result.enPassantCapturedSquare = capturedSquare;
+    }
+    board.enPassantTarget = ((piece == 3 || piece == 9) && std::abs(from - to) == 16)
+        ? (from + to) / 2
+        : -1;
+    result.promotion = reachedPromotionRank && move.promotion == 0;
+    return result;
+};

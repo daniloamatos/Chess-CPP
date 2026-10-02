@@ -12,17 +12,20 @@ int main()
     int h,w;
     Board board{};
     h = 800; w = 800;
-    InitWindow(h, w, "raylib [core] example - basic window");
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    InitWindow(h, w, "Chess");
+    SetWindowMinSize(320, 320);
+    RenderTexture2D boardCanvas = LoadRenderTexture(w, h);
+    SetTextureFilter(boardCanvas.texture, TEXTURE_FILTER_BILINEAR);
     SetTargetFPS(30); 
     int boardTiles = sizeof(board.squares);
     int boardSides = sqrt(boardTiles);
     int tileSize = std::min(h,w) / boardSides;
 
-    bool whiteTurn = true;
     int selectedSquare = -1;
     //Initializing board
 
-    // King = 0 , Queen = 1, Pawn = 2, Bishop = 3, Knigh = 4, Tower = 5
+    // King = 0 , Queen = 1, Pawn = 2, Bishop = 3, Knigh = 4, Rook = 5
     auto put = [&](int color, int type, int square)
     {
         board.squares[square] = 1 + type + 6 * color;
@@ -31,7 +34,6 @@ int main()
 
 
     int backRank[8] = {5, 4, 3, 1, 0, 3, 4, 5};
-
     for (int col = 0; col < 8; ++col)
     {
         put(1, backRank[col], col);      // black: a1–h1
@@ -64,7 +66,7 @@ int main()
     }
 
     //Draw the board once, instead of drawing everyframe
-    BeginDrawing();
+    BeginTextureMode(boardCanvas);
         for (int i = 0; i < boardTiles && !WindowShouldClose(); i++)
         {
             int col = fmod(i, boardSides);
@@ -74,24 +76,45 @@ int main()
                 : Color{181, 136, 99, 255};
             DrawRectangle(col * tileSize, row * tileSize, tileSize, tileSize, boardColor);
             DrawText(TextFormat("%d", i), col * tileSize + 4, row * tileSize + 4, 16, BLACK);
-            if(board.squares[i] >= 1 && board.squares[i] <= 6 || board.squares[i] >= 7 && board.squares[i] <= 12)
+            if(board.squares[i] != 0)
             {
                 DrawTexture(pieceTextures[board.squares[i]], col * tileSize, row * tileSize, WHITE);
             }
         }
-    EndDrawing();
-    int movedPiece = -1;
-    int movedFrom[2] = {-1, -1};
-    int movedTo[2] = {-1, -1};
+    EndTextureMode();
+
     std::vector <int> colorChanged;
     int color = 0;
     int turn = 0;
     bool promotion = false;
     int promotionSquare = -1;
+    std::uint64_t selectedMoves = 0;
+    MoveList availableMoves = generateMoves(board, turn);
+
     while (!WindowShouldClose())
     {
+        if (IsKeyPressed(KEY_F11))
+            ToggleBorderlessWindowed(); // tela cheia sem bordas; F11 novamente restaura
+
+        const float scale = std::min(
+            GetScreenWidth() / static_cast<float>(w),
+            GetScreenHeight() / static_cast<float>(h)
+        );
+
+        const Rectangle boardArea = {
+            (GetScreenWidth() - w * scale) / 2.0f,
+            (GetScreenHeight() - h * scale) / 2.0f,
+            w * scale,
+            h * scale
+        };
+
+        // Converte o mouse da janela para as coordenadas originais do tabuleiro.
+        const Vector2 boardMouse = {
+            (GetMouseX() - boardArea.x) / scale,
+            (GetMouseY() - boardArea.y) / scale
+        };
         //Draw only if have changes on the board
-        BeginDrawing();
+        BeginTextureMode(boardCanvas);
         while(!colorChanged.empty() && selectedSquare == -1)
         {
             int squareToChange = colorChanged.back();
@@ -109,21 +132,6 @@ int main()
             }
             colorChanged.pop_back();
         }
-        if(movedPiece >= 1 && movedPiece <= 12)
-        {
-                Color boardColor = (movedFrom[0] + movedFrom[1]) % 2 == 0
-                    ? Color{240, 217, 181, 255}
-                    : Color{181, 136, 99, 255};
-                DrawRectangle(movedFrom[0] * tileSize, movedFrom[1] * tileSize, tileSize, tileSize, boardColor);
-                //DrawText(TextFormat("%d", i), movedFrom[0] * tileSize + 4, movedFrom[1] * tileSize + 4, 16, BLACK);
-                DrawTexture(pieceTextures[movedPiece],movedTo[0] * tileSize, movedTo[1] * tileSize, WHITE);
-                //DrawText(TextFormat("%d", i), movedTo[0] * tileSize + 4, movedTo[1] * tileSize + 4, 16, BLACK);
-                movedPiece = -1;
-                movedFrom[0] = -1;
-                movedFrom[1] = -1;
-                movedTo[0] = -1;
-                movedTo[1] = -1;
-        }
         if (promotion)
         {
             int options[4] = {
@@ -137,13 +145,91 @@ int main()
             for (int i = 0; i < 4; ++i)
                 DrawTexture(pieceTextures[options[i]], 200 + i * 100, 350, WHITE);
         }
+        EndTextureMode();
+
+        BeginDrawing();
+            ClearBackground(Color{22, 25, 32, 255});
+
+            auto drawPanel = [](Rectangle area, const char* title,
+                                const char* subtitle, const char* text)
+            {
+                if (area.width < 120 || area.height < 100)
+                    return;
+
+                DrawRectangleRounded(area, 0.08f, 8, Color{32, 37, 47, 255});
+
+                // Impede que o texto ultrapasse o painel em janelas menores.
+                BeginScissorMode(
+                    static_cast<int>(area.x),
+                    static_cast<int>(area.y),
+                    static_cast<int>(area.width),
+                    static_cast<int>(area.height)
+                );
+
+                const int left = static_cast<int>(area.x) + 16;
+                const int top = static_cast<int>(area.y) + 20;
+
+                DrawText(title, left, top, 24, RAYWHITE);
+                DrawText(subtitle, left, top + 38, 18, Color{130, 190, 160, 255});
+                DrawText(text, left, top + 78, 16, Color{175, 182, 195, 255});
+
+                EndScissorMode();
+            };
+
+            const float padding = 16.0f;
+
+            // Janela larga: painéis nas laterais.
+            if (boardArea.x >= 152)
+            {
+                drawPanel(
+                    Rectangle{
+                        padding, padding,
+                        boardArea.x - 2 * padding,
+                        GetScreenHeight() - 2 * padding
+                    },
+                    "JOGADORES",
+                    turn == 0 ? "Sua vez" : "Vez das pretas",
+                    "Voce - Brancas\n\nComputador - Pretas\n\n"
+                    "Tempo\n--:--\n\nDificuldade\nEm breve"
+                );
+
+                drawPanel(
+                    Rectangle{
+                        boardArea.x + boardArea.width + padding,
+                        padding,
+                        boardArea.x - 2 * padding,
+                        GetScreenHeight() - 2 * padding
+                    },
+                    "PARTIDA",
+                    "Historico",
+                    "Nenhum lance registrado\n\n"
+                    "Pecas capturadas\n--\n\n"
+                    "F11 - Tela cheia"
+                );
+            }
+            // Janela alta: painel abaixo do tabuleiro.
+            else if (boardArea.y >= 132)
+            {
+                drawPanel(
+                    Rectangle{
+                        padding,
+                        boardArea.y + boardArea.height + padding,
+                        GetScreenWidth() - 2 * padding,
+                        boardArea.y - 2 * padding
+                    },
+                    "PARTIDA",
+                    turn == 0 ? "Sua vez - Brancas" : "Vez das pretas",
+                    "Historico e pecas capturadas em breve"
+                );
+            }
+            DrawTexturePro(boardCanvas.texture, Rectangle{0, 0, static_cast<float>(w), -static_cast<float>(h)}, boardArea, Vector2{0, 0}, 0, WHITE);
         EndDrawing();
-       
+
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
         {
             if (promotion)
             {
-                Vector2 mouse = GetMousePosition();
+                Vector2 mouse =  boardMouse;
                 for (int i = 0; i < 4; ++i)
                 {
                     Rectangle area{200.0f + i * 100, 350.0f, 100.0f, 100.0f};
@@ -155,25 +241,26 @@ int main()
                             color == 0 ? 4 : 10,
                             color == 0 ? 5 : 11
                         };
-                        board.squares[promotionSquare] = options[i];
+                        setSquare(board, promotionSquare, options[i]);
                         colorChanged.push_back(promotionSquare);
                         // Redraw every board square covered by the menu.
                         for (int row = 3; row <= 4; ++row)
                             for (int col = 1; col <= 6; ++col)
                                 colorChanged.push_back(row * boardSides + col);
                         promotion = false;
+                        availableMoves = generateMoves(board, turn);
                         break;
                     }
                 }
                 continue;
             }
-            int x = GetMouseX();
-            int y = GetMouseY();
+            const float x = boardMouse.x;
+            const float y = boardMouse.y;
             
             if((x >= 0 && x < boardSides * tileSize) && (y >= 0 && y < boardSides * tileSize))
             {
-                int col = x / tileSize;
-                int row = y / tileSize;
+                const int col = static_cast<int>(x) / tileSize;
+                const int row = static_cast<int>(y) / tileSize;
                 int square = row * boardSides + col;
                 int piece = board.squares[square];
                 if (selectedSquare == -1)
@@ -181,95 +268,88 @@ int main()
                     color = piece > 0 ? (piece < 7 ? 0 : 1) : -1;   
                     if (turn == color)
                     {
-                        movedFrom[0] = col;
-                        movedFrom[1] = row;
                         selectedSquare = square;
                         
-                        BeginDrawing();
-                        for (int to = 0; to < boardTiles; to++)
+                        BeginTextureMode(boardCanvas);
+                        DrawRectangle(col * tileSize, row * tileSize, tileSize, tileSize, {0, 0, 255, 100});
+                        for (std::size_t i = 0; i < availableMoves.count; ++i)
                         {
-                            if (validateMovement(board, selectedSquare, to, color))
-                            {
-                                int moveCol = fmod(to, boardSides);
-                                int moveRow = to / boardSides;
-                                bool capture = board.squares[to] != 0;
-                                Color highlight = capture
-                                    ? Color{200, 0, 0, 100}
-                                    : Color{0, 128, 0, 100};
-                                DrawRectangle(moveCol * tileSize, moveRow * tileSize, tileSize, tileSize, highlight);
-                                colorChanged.push_back(to);
-                            }
+                            const Move& move = availableMoves.moves[i];
+                            if (move.from != selectedSquare)
+                                continue;
+
+                            const std::uint64_t destinationBit = 1ULL << move.to;
+
+                            if (selectedMoves & destinationBit)
+                                continue;
+                            selectedMoves |= destinationBit;
+                            const int to = move.to;
+                            const int destinationColumn = to % boardSides;
+                            const int destinationRow = to / boardSides;
+
+                            const int selectedPiece = board.squares[selectedSquare];
+
+                            const bool capture = board.squares[to] != 0 ||
+                                ((selectedPiece == 3 || selectedPiece == 9) &&
+                                to == board.enPassantTarget);
+
+                            Color highlight = capture
+                                ? Color{200, 0, 0, 100}
+                                : Color{0, 128, 0, 100};
+
+                            DrawRectangle(
+                                destinationColumn * tileSize,
+                                destinationRow * tileSize,
+                                tileSize, tileSize, highlight
+                            );
+                            colorChanged.push_back(to);
                         }
-                        EndDrawing();
+
+                        EndTextureMode();
                     }
                 }
                 else
                 {
                     int from = selectedSquare;
                     int to = square;
-                    piece = board.squares[from];
-                    
-                    if (validateMovement(board, from, to, color))
-                    {
-                        if(piece == 1 || (piece == 6 && from == 56))
-                            board.canCastleQueenside[0] = false;
-                        if (piece == 1 || (piece == 6 && from == 63))
-                            board.canCastleKingside[0] = false;
-                        else if(piece == 7 || (piece == 12 && from == 0))
-                            board.canCastleQueenside[1] = false;
-                        if (piece == 7 || (piece == 12 && from == 7))
-                            board.canCastleKingside[1] = false;
-                        int capturedPiece = board.squares[to];
-                        if (capturedPiece == 6 && to == 56)
-                            board.canCastleQueenside[0] = false;
-                        if (capturedPiece == 6 && to == 63)
-                            board.canCastleKingside[0] = false;
-                        if (capturedPiece == 12 && to == 0)
-                            board.canCastleQueenside[1] = false;
-                        if (capturedPiece == 12 && to == 7)
-                            board.canCastleKingside[1] = false;
-                        board.squares[to] = piece;
-                        board.squares[from] = 0;
-                        movedPiece = piece;
-                        movedTo[0] = col;
-                        movedTo[1] = row;
-                        if (std::abs(from - to) == 2 && (piece == 1 || piece == 7))
-                        {
-                            int rookFrom = (color == 0 ? 56 : 0) + (to > from ? 7 : 0) ;
-                            int rookTo = (from + to) / 2;
-                            board.squares[rookTo] = board.squares[rookFrom];
-                            board.squares[rookFrom] = 0;
-                            colorChanged.push_back(rookFrom);
-                        }
-                        if (std::abs(from - to) == 16 && (piece == 3 || piece == 9))
-                        {
-                            board.enPassantTarget = (from + to) / 2;
-                        }
-                        else
-                        {
-                            if ((piece == 3 || piece == 9) && to == board.enPassantTarget)
-                            {
-                                int capturedSquare = to + (color == 0 ? 8 : -8);
-                                board.squares[capturedSquare] = 0;
-                                colorChanged.push_back(capturedSquare);
-                            }
-                            board.enPassantTarget = -1;
-                        }
-                        promotion = (piece == 3 && to < 8) || (piece == 9 && to >= 56);
+
+                    if (selectedMoves & (1ULL << to)) {
+                        Move move{selectedSquare, to, 0};
+                        MoveResult result = makeMove(board, move);
+
+                        colorChanged.push_back(to);
+
+                        promotion = result.promotion;
                         if (promotion)
                             promotionSquare = to;
-                        turn = turn == 0 ? 1 : 0; 
+
+                        if (result.rookFrom != -1)
+                        {
+                            colorChanged.push_back(result.rookFrom);
+                            colorChanged.push_back(result.rookTo);
+                        }
+
+                        if (result.enPassantCapturedSquare != -1)
+                            colorChanged.push_back(result.enPassantCapturedSquare);
+
+                        colorChanged.push_back(from);
+                        turn = 1 - turn;
+
+                        if (!promotion)
+                            availableMoves = generateMoves(board, turn);
                     }
                     else
                     {
-                        movedFrom[0] = -1;
-                        movedFrom[1] = -1;
+                        colorChanged.push_back(from);
                     }
+
                     selectedSquare = -1;
+                    selectedMoves = 0;
                 }
             }
         }
     }
+    UnloadRenderTexture(boardCanvas);
     CloseWindow();  
     return 0;
 }
