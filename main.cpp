@@ -219,6 +219,15 @@ int main()
                             board.canCastleQueenside[1] = false;
                         if (piece == 7 || (piece == 12 && from == 7))
                             board.canCastleKingside[1] = false;
+                        int capturedPiece = board.squares[to];
+                        if (capturedPiece == 6 && to == 56)
+                            board.canCastleQueenside[0] = false;
+                        if (capturedPiece == 6 && to == 63)
+                            board.canCastleKingside[0] = false;
+                        if (capturedPiece == 12 && to == 0)
+                            board.canCastleQueenside[1] = false;
+                        if (capturedPiece == 12 && to == 7)
+                            board.canCastleKingside[1] = false;
                         board.squares[to] = piece;
                         board.squares[from] = 0;
                         movedPiece = piece;
@@ -236,11 +245,14 @@ int main()
                         {
                             board.enPassantTarget = (from + to) / 2;
                         }
-                        else if((piece == 3 || piece == 9) && to == board.enPassantTarget)
+                        else
                         {
-                            int capturedSquare = to + (color == 0 ? 8 : -8);
-                            board.squares[capturedSquare] = 0;
-                            colorChanged.push_back(capturedSquare);
+                            if ((piece == 3 || piece == 9) && to == board.enPassantTarget)
+                            {
+                                int capturedSquare = to + (color == 0 ? 8 : -8);
+                                board.squares[capturedSquare] = 0;
+                                colorChanged.push_back(capturedSquare);
+                            }
                             board.enPassantTarget = -1;
                         }
                         promotion = (piece == 3 && to < 8) || (piece == 9 && to >= 56);
