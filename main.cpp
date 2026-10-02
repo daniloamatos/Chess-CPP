@@ -32,7 +32,6 @@ int main()
 
     int backRank[8] = {5, 4, 3, 1, 0, 3, 4, 5};
 
-    
     for (int col = 0; col < 8; ++col)
     {
         put(1, backRank[col], col);      // black: a1–h1
@@ -87,6 +86,8 @@ int main()
     std::vector <int> colorChanged;
     int color = 0;
     int turn = 0;
+    bool promotion = false;
+    int promotionSquare = -1;
     while (!WindowShouldClose())
     {
         //Draw only if have changes on the board
@@ -123,10 +124,49 @@ int main()
                 movedTo[0] = -1;
                 movedTo[1] = -1;
         }
+        if (promotion)
+        {
+            int options[4] = {
+                color == 0 ? 2 : 8,   // queen
+                color == 0 ? 6 : 12,  // rook
+                color == 0 ? 4 : 10,  // bishop
+                color == 0 ? 5 : 11   // knight
+            };
+
+            DrawRectangle(190, 340, 420, 120, DARKGRAY);
+            for (int i = 0; i < 4; ++i)
+                DrawTexture(pieceTextures[options[i]], 200 + i * 100, 350, WHITE);
+        }
         EndDrawing();
        
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
         {
+            if (promotion)
+            {
+                Vector2 mouse = GetMousePosition();
+                for (int i = 0; i < 4; ++i)
+                {
+                    Rectangle area{200.0f + i * 100, 350.0f, 100.0f, 100.0f};
+                    if (CheckCollisionPointRec(mouse, area))
+                    {
+                        int options[4] = {
+                            color == 0 ? 2 : 8,
+                            color == 0 ? 6 : 12,
+                            color == 0 ? 4 : 10,
+                            color == 0 ? 5 : 11
+                        };
+                        board.squares[promotionSquare] = options[i];
+                        colorChanged.push_back(promotionSquare);
+                        // Redraw every board square covered by the menu.
+                        for (int row = 3; row <= 4; ++row)
+                            for (int col = 1; col <= 6; ++col)
+                                colorChanged.push_back(row * boardSides + col);
+                        promotion = false;
+                        break;
+                    }
+                }
+                continue;
+            }
             int x = GetMouseX();
             int y = GetMouseY();
             
@@ -150,7 +190,6 @@ int main()
                         {
                             if (validateMovement(board, selectedSquare, to, color))
                             {
-                                std::cout << to << " " << (selectedSquare / 8) - (to / 8) << " " << (selectedSquare % 8) - (to % 8) << "\n" ;
                                 int moveCol = fmod(to, boardSides);
                                 int moveRow = to / boardSides;
                                 bool capture = board.squares[to] != 0;
@@ -172,11 +211,41 @@ int main()
                     
                     if (validateMovement(board, from, to, color))
                     {
+                        if(piece == 1 || (piece == 6 && from == 56))
+                            board.canCastleQueenside[0] = false;
+                        if (piece == 1 || (piece == 6 && from == 63))
+                            board.canCastleKingside[0] = false;
+                        else if(piece == 7 || (piece == 12 && from == 0))
+                            board.canCastleQueenside[1] = false;
+                        if (piece == 7 || (piece == 12 && from == 7))
+                            board.canCastleKingside[1] = false;
                         board.squares[to] = piece;
                         board.squares[from] = 0;
                         movedPiece = piece;
                         movedTo[0] = col;
                         movedTo[1] = row;
+                        if (std::abs(from - to) == 2 && (piece == 1 || piece == 7))
+                        {
+                            int rookFrom = (color == 0 ? 56 : 0) + (to > from ? 7 : 0) ;
+                            int rookTo = (from + to) / 2;
+                            board.squares[rookTo] = board.squares[rookFrom];
+                            board.squares[rookFrom] = 0;
+                            colorChanged.push_back(rookFrom);
+                        }
+                        if (std::abs(from - to) == 16 && (piece == 3 || piece == 9))
+                        {
+                            board.enPassantTarget = (from + to) / 2;
+                        }
+                        else if((piece == 3 || piece == 9) && to == board.enPassantTarget)
+                        {
+                            int capturedSquare = to + (color == 0 ? 8 : -8);
+                            board.squares[capturedSquare] = 0;
+                            colorChanged.push_back(capturedSquare);
+                            board.enPassantTarget = -1;
+                        }
+                        promotion = (piece == 3 && to < 8) || (piece == 9 && to >= 56);
+                        if (promotion)
+                            promotionSquare = to;
                         turn = turn == 0 ? 1 : 0; 
                     }
                     else

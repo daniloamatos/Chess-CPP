@@ -12,6 +12,31 @@ bool validateMovement(const Board& board, int from, int to, int color)
         piece -= 6;
     if (piece == 1)
     {
+        bool initialRow = color == 0
+            ? (from == 60)
+            : (from == 4);
+        if (initialRow)
+        {
+            int colStep = (yDiff < 0) - (yDiff > 0);
+            bool castlingTarget = color == 0
+            ? (to == 62 || to == 58)
+            : (to == 6 || to == 2);
+            if (castlingTarget)
+            {
+                int rookSquare = to + (colStep > 0 ? colStep : 2 * colStep);
+                if (colStep > 0 ? !board.canCastleKingside[color] : !board.canCastleQueenside[color])
+                    return false;
+                if (board.squares[rookSquare] == (color == 0 ? 6 : 12))
+                {
+                    for (int square = from + colStep; square != rookSquare; square += colStep)
+                    {
+                        if (board.squares[square] != 0)
+                            return false;
+                    }
+                    return true;
+                }
+            }
+        }
         if (std::abs(xDiff) > 1 || std::abs(yDiff) > 1)
         {
             return false;
@@ -59,10 +84,11 @@ bool validateMovement(const Board& board, int from, int to, int color)
         //check if is moving only forward once on the x-axis and once on the y-axis
         if (xDiff == 1 && (yDiff == -1 || yDiff == 1))
             //check if there is a black piece on to
-
-            return color == 0 
-            ? board.squares[to] >= 7 && board.squares[to] <= 12
-            : board.squares[to] >= 1 && board.squares[to] <= 6;
+            return (to == board.enPassantTarget && board.squares[to] == 0)
+            || (color == 0
+                ? board.squares[to] >= 7 && board.squares[to] <= 12
+                : board.squares[to] >= 1 && board.squares[to] <= 6);
+            
     }
     if (piece == 4)
     {
