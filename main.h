@@ -5,11 +5,28 @@
 #include <cstddef> 
 
 struct Board {
-    std::uint64_t pieces[2][6];
+    std::uint64_t byType[7]; 
+    std::uint64_t byColor[2];
     std::uint8_t squares[64];
-    bool canCastleKingside[2] = {true, true};
-    bool canCastleQueenside[2] = {true, true};
-    int enPassantTarget = -1;
+    std::uint8_t castling; // bit0 = WK, bit1 = WQ, bit2 = BK, bit3 = BQ
+    std::uint8_t enPassantTarget = -1;
+    std::uint8_t halfmove;   
+    std::uint8_t turn;
+};
+
+enum PieceType : std::uint8_t 
+{
+    OCCUPIED, KING, QUEEN, PAWN, BISHOP, KNIGHT, ROOK
+};
+
+enum PieceColor : std::uint8_t 
+{
+    WHITEPIECE, BLACKPIECE
+};
+
+enum Castling: std::uint8_t 
+{ 
+    WK = 1, WQ = 2, BK = 4, BQ = 8 
 };
 
 struct Move {
@@ -44,5 +61,6 @@ struct MoveList {
 };
 
 void setSquare(Board& board, int square, std::uint8_t piece);
-MoveList generateMoves(const Board& board, int color);
+MoveList generateMoves(Board& board, std::uint8_t color);
 MoveResult makeMove(Board& board, Move& move);
+std::array<std::uint64_t, 64> buildBishopAttacks();

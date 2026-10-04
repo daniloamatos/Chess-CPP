@@ -21,25 +21,28 @@ int main()
     int boardTiles = sizeof(board.squares);
     int boardSides = sqrt(boardTiles);
     int tileSize = std::min(h,w) / boardSides;
-
+    
     int selectedSquare = -1;
     //Initializing board
 
-    // King = 0 , Queen = 1, Pawn = 2, Bishop = 3, Knigh = 4, Rook = 5
+    // King = 1 , Queen = 2, Pawn = 3, Bishop = 4, Knight = 5, Rook = 6
     auto put = [&](int color, int type, int square)
     {
-        board.squares[square] = 1 + type + 6 * color;
-        board.pieces[color][type] |= 1ULL << square;
+        const std::uint64_t mask = 1ULL << square;
+        board.squares[square] = (color << 3) | type;
+        board.byColor[color] |= mask;
+        board.byType[OCCUPIED] |= mask;
+        board.byType[type] |= mask;
     };
 
 
-    int backRank[8] = {5, 4, 3, 1, 0, 3, 4, 5};
+    std::uint8_t backRank[8] = {ROOK, KNIGHT, BISHOP, QUEEN, KING, BISHOP, KNIGHT, ROOK};
     for (int col = 0; col < 8; ++col)
     {
-        put(1, backRank[col], col);      // black: a1–h1
-        put(1, 2, 8 + col);              // black: a2–h2
-        put(0, 2, 48 + col);             // white: a7–h7
-        put(0, backRank[col], 56 + col); // white: a8–h8
+        put(BLACKPIECE, backRank[col], col);      // black: a1–h1
+        put(BLACKPIECE, PAWN, 8 + col);              // black: a2–h2
+        put(WHITEPIECE, PAWN, 48 + col);             // white: a7–h7
+        put(WHITEPIECE, backRank[col], 56 + col); // white: a8–h8
     }
     const char* files[13] =
     {
@@ -52,7 +55,7 @@ int main()
 
     Texture2D pieceTextures[13]{};
 
-    for (int i = 1; i <= 12; ++i) {
+    for (int i = 1; i <= 12; i++) {
         const char* path = TextFormat("vectors/chess_pieces_svg/%s", files[i]);
         auto svg = lunasvg::Document::loadFromFile(path);
         if (!svg) continue;
@@ -69,30 +72,33 @@ int main()
     BeginTextureMode(boardCanvas);
         for (int i = 0; i < boardTiles && !WindowShouldClose(); i++)
         {
-            int col = fmod(i, boardSides);
+            int col = i % boardSides;
             int row = i / boardSides;
             Color boardColor = (row + col) % 2 == 0
                 ? Color{240, 217, 181, 255}
                 : Color{181, 136, 99, 255};
             DrawRectangle(col * tileSize, row * tileSize, tileSize, tileSize, boardColor);
             DrawText(TextFormat("%d", i), col * tileSize + 4, row * tileSize + 4, 16, BLACK);
-            if(board.squares[i] != 0)
+
+            const int piece = board.squares[i];
+            if (piece != 0)
             {
-                DrawTexture(pieceTextures[board.squares[i]], col * tileSize, row * tileSize, WHITE);
+                const int idx = (piece & 7) + 6 * (piece >> 3);   // 1..12
+                DrawTexture(pieceTextures[idx], col * tileSize, row * tileSize, WHITE);
             }
         }
     EndTextureMode();
 
     std::vector <int> colorChanged;
-    int color = 0;
-    int turn = 0;
     bool promotion = false;
     int promotionSquare = -1;
     std::uint64_t selectedMoves = 0;
-    MoveList availableMoves = generateMoves(board, turn);
+    MoveList availableMoves = generateMoves(board, board.turn);
 
     while (!WindowShouldClose())
     {
+        std::uint8_t turn = turn;
+
         if (IsKeyPressed(KEY_F11))
             ToggleBorderlessWindowed(); // tela cheia sem bordas; F11 novamente restaura
 
@@ -135,10 +141,10 @@ int main()
         if (promotion)
         {
             int options[4] = {
-                color == 0 ? 2 : 8,   // queen
-                color == 0 ? 6 : 12,  // rook
-                color == 0 ? 4 : 10,  // bishop
-                color == 0 ? 5 : 11   // knight
+                turn == 0 ? 2 : 8,   // queen
+                turn == 0 ? 4 : 10,  // bishop
+                turn == 0 ? 5 : 11,   // knight
+                turn == 0 ? 6 : 12  // rook
             };
 
             DrawRectangle(190, 340, 420, 120, DARKGRAY);
@@ -235,11 +241,12 @@ int main()
                     Rectangle area{200.0f + i * 100, 350.0f, 100.0f, 100.0f};
                     if (CheckCollisionPointRec(mouse, area))
                     {
-                        int options[4] = {
-                            color == 0 ? 2 : 8,
-                            color == 0 ? 6 : 12,
-                            color == 0 ? 4 : 10,
-                            color == 0 ? 5 : 11
+                        int options[4] = 
+                        {
+                            turn == 0 ? 2 : 8,   // queen
+                            turn == 0 ? 4 : 10,  // bishop
+                            turn == 0 ? 5 : 11,   // knight
+                            turn == 0 ? 6 : 12  // rook
                         };
                         setSquare(board, promotionSquare, options[i]);
                         colorChanged.push_back(promotionSquare);
@@ -265,8 +272,8 @@ int main()
                 int piece = board.squares[square];
                 if (selectedSquare == -1)
                 {
-                    color = piece > 0 ? (piece < 7 ? 0 : 1) : -1;   
-                    if (turn == color)
+                    turn = piece > 0 ? (piece < 7 ? 0 : 1) : -1;   
+                    if (turn == turn)
                     {
                         selectedSquare = square;
                         
@@ -333,7 +340,7 @@ int main()
                             colorChanged.push_back(result.enPassantCapturedSquare);
 
                         colorChanged.push_back(from);
-                        turn = 1 - turn;
+                        turn ^= 1;
 
                         if (!promotion)
                             availableMoves = generateMoves(board, turn);
